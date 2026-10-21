@@ -1,0 +1,216 @@
+"""Read-only HTTP API over the recorded store. Run: python -m fathom.api"""
+import json
+import os
+import threading
+import time
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+
+from . import config, db, designer, export, metrics
+
+app = FastAPI(title="Fathom API", version="1.0",
+              description="Strike BTC-USD liquidity scorecard. Read-only; all values computed from recorded public feeds.")
+app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ORIGINS, allow_methods=["GET", "POST"], allow_headers=["*"])
+
+_local = threading.local()
+
+
+def con():
+    c = getattr(_local, "con", None)
+    if c is None:
+        c = _local.con = db.connect(config.DB_PATH, readonly=True)
+    return c
+
+
+def parse_step(step: str):
+    if step not in metrics.STEPS:
+        raise HTTPException(400, f"step must be one of {list(metrics.STEPS)}")
+    return step
+
+
+@app.get("/api/health")
+def health():
+    c = con()
+    now = db.now_ms()
+    feeds = {}
+    for v in ("strike", "binance", "hyperliquid", "strike_market"):
+        hb = db.get_meta(c, f"heartbeat:{v}")
+        feeds[v] = {"heartbeat_age_s": (now - int(hb)) / 1000 if hb else None, "ok": bool(hb) and now - int(hb) < 30_000}
+    return {"now": now, "feeds": feeds, "ok": all(f["ok"] for f in feeds.values())}
+
+
+@app.get("/api/latest")
+def latest():
+    """Most recent book sample per venue (what the landing page widget shows)."""
+    c = con()
+    out = {}
+    for v in metrics.VENUES:
+        r = c.execute("SELECT ts,mid,spread_bps,buy_s10k,sell_s10k,buy_s50k,sell_s50k,buy_s100k,sell_s100k "
+                      "FROM book_samples WHERE venue=? AND two_sided=1 ORDER BY ts DESC LIMIT 1", (v,)).fetchone()
+        if r:
+            out[v] = dict(zip(("ts", "mid", "spread_bps", "buy_10k", "sell_10k", "buy_50k", "sell_50k", "buy_100k", "sell_100k"), r))
+    return out
+
+
+@app.get("/api/book")
+def book():
+    """Latest recorded Strike L3 book as aggregated levels (used to draw the depth artwork)."""
+    raw = db.get_meta(con(), "strike_latest_book")
+    if not raw:
+        raise HTTPException(503, "no book recorded yet")
+    b = json.loads(raw)
+    return {"ts": b["ts"], "seq": b["seq"], "bids": b["bids"][:200], "asks": b["asks"][:200]}
+
+
+@app.get("/api/coverage")
+def coverage():
+    return metrics.coverage(con())
+
+
+@app.get("/api/gaps")
+def gaps(limit: int = 200):
+    rows = con().execute("SELECT id,venue,start_ms,end_ms,reason,last_sequence FROM gaps ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(zip(("id", "venue", "start_ms", "end_ms", "reason", "last_sequence"), r)) for r in rows]
+
+
+@app.get("/api/scorecard")
+def scorecard(window_minutes: int = Query(60, ge=1, le=60 * 24 * 14)):
+    """Latest window plus the window immediately before it, for every venue; M4 for Strike."""
+    c = con()
+    last = c.execute("SELECT MAX(ts) FROM book_samples").fetchone()[0]
+    if not last:
+        raise HTTPException(503, "no data recorded yet")
+    w = window_minutes * 60_000
+    end, mid, start = last + 1, last + 1 - w, last + 1 - 2 * w
+    out = {"as_of": last, "window_minutes": window_minutes, "venues": {}}
+    for v in metrics.VENUES:
+        out["venues"][v] = {"current": metrics.book_window(c, v, mid, end), "previous": metrics.book_window(c, v, start, mid)}
+    out["m4_strike"] = {"current": metrics.cancel_fill_window(c, mid, end), "previous": metrics.cancel_fill_window(c, start, mid)}
+    first = c.execute("SELECT MIN(ts) FROM book_samples WHERE venue='strike'").fetchone()[0]
+    out["since_start"] = {v: metrics.book_window(c, v, first, end) for v in metrics.VENUES}
+    out["m4_since_start"] = metrics.cancel_fill_window(c, first, end)
+    out["binance_markets"] = json.loads(db.get_meta(c, "binance_markets", "[]"))
+    out["notes"] = [
+        "Binance is the USD-M perpetual BTCUSDT when reachable, otherwise Binance's public spot BTCUSDT mirror; the markets used and when are in binance_markets. "
+        "Venue differences: Strike is read from the full L3 book. Binance (futures BTCUSDT) is a 1000-level local book, "
+        "Hyperliquid BTC is the top 20 levels per side at two price granularities; bands outside a feed's reach are n/a.",
+    ]
+    return out
+
+
+@app.get("/api/series")
+def series(venue: str = "strike", step: str = "minute", start: int | None = None, end: int | None = None,
+           hours: float = 6):
+    if venue not in metrics.VENUES:
+        raise HTTPException(400, f"venue must be one of {list(metrics.VENUES)}")
+    parse_step(step)
+    c = con()
+    last = c.execute("SELECT MAX(ts) FROM book_samples").fetchone()[0] or db.now_ms()
+    end = end or last + 1
+    start = start or end - int(hours * 3_600_000)
+    if (end - start) / metrics.STEPS[step] > 20_000:
+        raise HTTPException(400, "range too large for this step")
+    return {"venue": venue, "step": step, "start": start, "end": end, "points": metrics.book_series(c, venue, step, start, end)}
+
+
+@app.get("/api/query")
+def query(start: int, end: int, step: str = "minute", venues: str = "strike,binance,hyperliquid"):
+    """Metric values for a time range (unix ms), the read-only endpoint from the PRD."""
+    parse_step(step)
+    if (end - start) / metrics.STEPS[step] > 20_000:
+        raise HTTPException(400, "range too large for this step")
+    c = con()
+    res = {}
+    for v in venues.split(","):
+        if v not in metrics.VENUES:
+            raise HTTPException(400, f"unknown venue {v}")
+        res[v] = metrics.book_series(c, v, step, start, end)
+    res["m4_strike"] = metrics.cancel_fill_series(c, step, start, end)
+    return {"start": start, "end": end, "step": step, "data": res}
+
+
+@app.get("/api/cancel_fill")
+def cancel_fill(step: str = "hour", hours: float = 24):
+    parse_step(step)
+    c = con()
+    last = c.execute("SELECT MAX(ts) FROM l3_events").fetchone()[0] or db.now_ms()
+    return {"step": step, "points": metrics.cancel_fill_series(c, step, last - int(hours * 3_600_000), last + 1)}
+
+
+@app.get("/api/resilience")
+def resilience(hours: float = 48, min_usd: float = 10_000):
+    c = con()
+    last = c.execute("SELECT MAX(ts) FROM l3_events").fetchone()[0] or db.now_ms()
+    return metrics.resilience(c, last - int(hours * 3_600_000), last + 1, min_usd=min_usd)
+
+
+class DesignerIn(BaseModel):
+    rebate_bps: float = Field(ge=0, le=100)
+    n_quoters: int = Field(ge=0, le=1000)
+    quote_size_usd: float = Field(ge=0, le=100_000_000)
+    adverse_selection_bps: float = Field(1.5, gt=0, le=100)
+    turnover_per_day: float = Field(1.0, ge=0, le=1000)
+
+
+@app.post("/api/designer")
+def designer_run(body: DesignerIn):
+    try:
+        return designer.run(con(), **body.model_dump())
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.get("/api/dataset")
+def dataset_list():
+    return {"files": export.list_files(), "schema": "/api/dataset/schema"}
+
+
+@app.get("/api/dataset/schema")
+def dataset_schema():
+    return FileResponse(export.SCHEMA_README, media_type="text/markdown")
+
+
+@app.get("/api/dataset/{name}")
+def dataset_file(name: str):
+    path = export.resolve(name)
+    if not path:
+        raise HTTPException(404, "no such file")
+    return FileResponse(path, filename=os.path.basename(path))
+
+
+def _export_loop():
+    while True:
+        try:
+            export.build_all()
+        except Exception as e:  # noqa: BLE001
+            print("export failed:", repr(e))
+        time.sleep(900)
+
+
+def _rollup_loop():
+    wcon = db.connect(config.DB_PATH)  # also creates any missing tables
+    while True:
+        try:
+            metrics.rollup_events(wcon)
+        except Exception as e:  # noqa: BLE001
+            print("rollup failed:", repr(e))
+        time.sleep(30)
+
+
+@app.on_event("startup")
+def _startup():
+    db.connect(config.DB_PATH).close()  # make sure tables exist before readers query them
+    threading.Thread(target=_rollup_loop, daemon=True).start()
+    threading.Thread(target=_export_loop, daemon=True).start()
+
+
+def main():
+    import uvicorn
+    uvicorn.run(app, host=config.API_HOST, port=config.API_PORT)
+
+
+if __name__ == "__main__":
+    main()
