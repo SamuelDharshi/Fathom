@@ -1,0 +1,10 @@
+data/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+
+# generated / local
+*.log
+web/package-lock.json
+.vscode/

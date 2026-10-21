@@ -1,0 +1,33 @@
+import os
+
+try:  # optional .env at the project root (never required: every feed is public)
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+except ImportError:
+    pass
+
+DB_PATH = os.environ.get("FATHOM_DB", os.path.join(os.path.dirname(__file__), "..", "data", "fathom.db"))
+EXPORT_DIR = os.environ.get("FATHOM_EXPORT_DIR", os.path.join(os.path.dirname(__file__), "..", "data", "export"))
+
+STRIKE_REST = os.environ.get("STRIKE_REST", "https://api.strikefinance.org")
+STRIKE_WS = os.environ.get("STRIKE_WS", "wss://api.strikefinance.org")
+SYMBOL = "BTC-USD"
+
+# Binance market: "auto" (futures, else spot mirror), "futures", "spot" or "spot_mirror". Futures is closest to Strike perps.
+BINANCE_MARKET = os.environ.get("BINANCE_MARKET", "auto")
+BINANCE_RESYNC_SECONDS = int(os.environ.get("BINANCE_RESYNC_SECONDS", 900))
+HYPERLIQUID_WS = os.environ.get("HYPERLIQUID_WS", "wss://api.hyperliquid.xyz/ws")
+
+CHECKPOINT_SECONDS = int(os.environ.get("CHECKPOINT_SECONDS", 600))
+HEARTBEAT_SECONDS = 5
+FLUSH_SECONDS = 0.5
+SAMPLE_SECONDS = 2
+# Strike refreshes its whole book once a second in one burst of ~190 cancel/open events. Sampling mid-burst
+# sees a half-empty book, so L3 samples wait until the stream has been quiet this long.
+QUIET_SECONDS = 0.05
+MAX_SAMPLE_WAIT = 5
+
+# API
+API_HOST = os.environ.get("API_HOST", "0.0.0.0")
+API_PORT = int(os.environ.get("API_PORT", 8000))
+CORS_ORIGINS = [o for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o]
