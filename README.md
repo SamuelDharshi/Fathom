@@ -1,7 +1,7 @@
 # Fathom: the Strike market quality index
 
 > **How deep is Strike's book?**
-> Fathom records Strike's public **L3** (every resting order) BTC-USD feed around the clock, measures its liquidity quality the
+> Fathom records Strike's public **L3** (every resting order) BTC-USD feed live, measures its liquidity quality the
 > same way as Binance and Hyperliquid, and publishes the result as a live scorecard, an open dataset and a read-only API.
 
 **Live scorecard:** https://fathom-strike.vercel.app  |  **Demo video (2 min 43 s):** [fathom-demo.webm](https://github.com/SamuelDharshi/Fathom/releases/download/demo-v1/fathom-demo.webm)  |  **Strike feedback:** [FEEDBACK.md](FEEDBACK.md)

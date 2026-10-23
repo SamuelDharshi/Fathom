@@ -117,7 +117,7 @@ export default function Landing() {
         <div className="c right" style={{ padding: 0 }}>
           <div className="top">
             <div className="c dark" style={{ borderRight: "1px solid var(--rule)" }}>
-              <p className="statement fu" style={{ animationDelay: "0.5s" }}>Independent liquidity scorecard for Strike. Its public L3 order feed, recorded around the clock and measured against Binance and Hyperliquid.</p>
+              <p className="statement fu" style={{ animationDelay: "0.5s" }}>Independent liquidity scorecard for Strike. Its public L3 order feed, recorded live and measured against Binance and Hyperliquid.</p>
               <Link href="/scorecard" className="btn light">Open the scorecard <Arrow /></Link>
             </div>
             <div className="mintbox">
