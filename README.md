@@ -1,5 +1,9 @@
 # Fathom: the Strike market quality index
 
+<p align="center">
+  <img src="docs/images/fathom-cover.png" alt="Fathom: the Strike market quality index. How deep is Strike's book?" width="900">
+</p>
+
 > **How deep is Strike's book?**
 > Fathom records Strike's public **L3** (every resting order) BTC-USD feed live, measures its liquidity quality the
 > same way as Binance and Hyperliquid, and publishes the result as a live scorecard, an open dataset and a read-only API.
