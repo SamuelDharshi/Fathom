@@ -31,3 +31,8 @@ MAX_SAMPLE_WAIT = 5
 API_HOST = os.environ.get("API_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("API_PORT", 8000))
 CORS_ORIGINS = [o for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o]
+
+# Alerts: a feed whose heartbeat is older than this is "stale". If ALERT_WEBHOOK_URL is set (Discord, Slack or any
+# endpoint accepting a JSON POST) every alert is also delivered there; alerts are always stored and served at /api/alerts.
+ALERT_STALE_SECONDS = int(os.environ.get("ALERT_STALE_SECONDS", 60))
+ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "")

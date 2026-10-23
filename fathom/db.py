@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS event_minute (
   cancel_btc REAL, fill_btc REAL, cancel_usd REAL, fill_usd REAL,
   n_cancel INTEGER, n_fill INTEGER, n_open INTEGER
 );
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL, venue TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS strike_trades (
   trade_id INTEGER PRIMARY KEY,
   ts INTEGER NOT NULL, recv_ts INTEGER NOT NULL,

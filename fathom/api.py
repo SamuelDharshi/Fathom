@@ -77,22 +77,33 @@ def gaps(limit: int = 200):
 
 
 @app.get("/api/scorecard")
-def scorecard(window_minutes: int = Query(60, ge=1, le=60 * 24 * 14)):
+def scorecard(window_minutes: int = Query(60, ge=1, le=60 * 24 * 14), compare: str = Query("prev", pattern="^(prev|day|week)$")):
     """Latest window plus the window immediately before it, for every venue; M4 for Strike."""
     c = con()
     last = c.execute("SELECT MAX(ts) FROM book_samples").fetchone()[0]
     if not last:
         raise HTTPException(503, "no data recorded yet")
     w = window_minutes * 60_000
-    end, mid, start = last + 1, last + 1 - w, last + 1 - 2 * w
-    out = {"as_of": last, "window_minutes": window_minutes, "venues": {}}
+    end, mid = last + 1, last + 1 - w
+    # the comparison window: the one right before, or the same window 24 h / 7 days earlier (needs that much history)
+    shift = {"prev": w, "day": 86_400_000, "week": 7 * 86_400_000}[compare]
+    pstart, pend = mid - shift, end - shift
+    first_any = c.execute("SELECT MIN(ts) FROM book_samples WHERE venue='strike'").fetchone()[0]
+    has_history = first_any is not None and pstart >= first_any - 60_000
+    out = {"as_of": last, "window_minutes": window_minutes, "compare": compare, "compare_available": has_history, "venues": {}}
     for v in metrics.VENUES:
-        out["venues"][v] = {"current": metrics.book_window(c, v, mid, end), "previous": metrics.book_window(c, v, start, mid)}
-    out["m4_strike"] = {"current": metrics.cancel_fill_window(c, mid, end), "previous": metrics.cancel_fill_window(c, start, mid)}
+        out["venues"][v] = {"current": metrics.book_window(c, v, mid, end),
+                            "previous": metrics.book_window(c, v, pstart, pend) if has_history else None}
+    out["m4_strike"] = {"current": metrics.cancel_fill_window(c, mid, end),
+                        "previous": metrics.cancel_fill_window(c, pstart, pend) if has_history else None}
     first = c.execute("SELECT MIN(ts) FROM book_samples WHERE venue='strike'").fetchone()[0]
     out["since_start"] = {v: metrics.book_window(c, v, first, end) for v in metrics.VENUES}
     out["m4_since_start"] = metrics.cancel_fill_window(c, first, end)
-    out["binance_markets"] = json.loads(db.get_meta(c, "binance_markets", "[]"))
+    mk = json.loads(db.get_meta(c, "binance_markets", "[]"))
+    fb = c.execute("SELECT MIN(ts) FROM book_samples WHERE venue='binance'").fetchone()[0]
+    if fb and (not mk or mk[0][0] > fb):  # switches were only logged later; before that it was the perpetual
+        mk = [[fb, "futures"]] + mk
+    out["binance_markets"] = mk
     out["notes"] = [
         "Binance is the USD-M perpetual BTCUSDT when reachable, otherwise Binance's public spot BTCUSDT mirror; the markets used and when are in binance_markets. "
         "Venue differences: Strike is read from the full L3 book. Binance (futures BTCUSDT) is a 1000-level local book, "
@@ -147,6 +158,19 @@ def resilience(hours: float = 48, min_usd: float = 10_000):
     return metrics.resilience(c, last - int(hours * 3_600_000), last + 1, min_usd=min_usd)
 
 
+@app.get("/api/toxicity")
+def toxicity(hours: float = 48, horizon_s: int = Query(10, ge=1, le=60)):
+    c = con()
+    last = c.execute("SELECT MAX(ts) FROM l3_events").fetchone()[0] or db.now_ms()
+    return metrics.flow_toxicity(c, last - int(hours * 3_600_000), last + 1, horizon_s * 1000)
+
+
+@app.get("/api/alerts")
+def alerts(limit: int = 50):
+    rows = con().execute("SELECT id,ts,venue,kind,message FROM alerts ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(zip(("id", "ts", "venue", "kind", "message"), r)) for r in rows]
+
+
 class DesignerIn(BaseModel):
     rebate_bps: float = Field(ge=0, le=100)
     n_quoters: int = Field(ge=0, le=1000)
@@ -190,6 +214,38 @@ def _export_loop():
         time.sleep(900)
 
 
+def _alert_loop():
+    """Alert when a feed heartbeat goes stale and again when it recovers. Always stored; POSTed if a webhook is set."""
+    import httpx
+    wcon = db.connect(config.DB_PATH)
+    stale = {}
+    while True:
+        try:
+            now = db.now_ms()
+            for v in ("strike", "binance", "hyperliquid", "strike_market"):
+                hb = db.get_meta(wcon, f"heartbeat:{v}")
+                if not hb:
+                    continue
+                age = (now - int(hb)) / 1000
+                is_stale = age > config.ALERT_STALE_SECONDS
+                if is_stale != stale.get(v, False):
+                    stale[v] = is_stale
+                    kind = "stale" if is_stale else "recovered"
+                    msg = f"{v} feed heartbeat is {age:.0f}s old" if is_stale else f"{v} feed is recording again"
+                    delivered = 0
+                    if config.ALERT_WEBHOOK_URL:
+                        try:
+                            body = {"content": f"Fathom: {msg}", "text": f"Fathom: {msg}"}
+                            delivered = int(httpx.post(config.ALERT_WEBHOOK_URL, json=body, timeout=8).status_code < 300)
+                        except Exception:  # noqa: BLE001
+                            delivered = 0
+                    wcon.execute("INSERT INTO alerts(ts,venue,kind,message,delivered) VALUES(?,?,?,?,?)", (now, v, kind, msg, delivered))
+                    wcon.commit()
+        except Exception as e:  # noqa: BLE001
+            print("alert loop error:", repr(e))
+        time.sleep(15)
+
+
 def _rollup_loop():
     wcon = db.connect(config.DB_PATH)  # also creates any missing tables
     while True:
@@ -204,6 +260,7 @@ def _rollup_loop():
 def _startup():
     db.connect(config.DB_PATH).close()  # make sure tables exist before readers query them
     threading.Thread(target=_rollup_loop, daemon=True).start()
+    threading.Thread(target=_alert_loop, daemon=True).start()
     threading.Thread(target=_export_loop, daemon=True).start()
 
 

@@ -193,3 +193,34 @@ def coverage(con) -> dict:
     ev = con.execute("SELECT COUNT(*),MIN(ts),MAX(ts) FROM l3_events").fetchone()
     out["l3_events"] = {"count": ev[0], "first_ts": ev[1], "last_ts": ev[2]}
     return out
+
+
+def flow_toxicity(con, start: int, end: int, horizon_ms: int = 10_000) -> dict:
+    """M6. Mid-price move over `horizon_ms` after every taker order, signed in the taker's direction, averaged.
+    Positive = price kept moving the taker's way (the resting side was picked off); negative = price reverted.
+    Mid comes from the burst-aware 2 s Strike samples: the last one at or before the trade and the first one at or
+    after trade time + horizon."""
+    takers = con.execute("""
+      SELECT taker_order_id, MIN(ts), side FROM l3_events
+      WHERE action IN ('partial_fill','full_fill') AND ts>=? AND ts<? GROUP BY taker_order_id""", (start, end)).fetchall()
+    moves = []
+    for _tid, ts, maker_side in takers:
+        pre = con.execute("SELECT mid FROM book_samples WHERE venue='strike' AND two_sided=1 AND ts<=? AND ts>? ORDER BY ts DESC LIMIT 1",
+                          (ts, ts - 6000)).fetchone()
+        post = con.execute("SELECT mid FROM book_samples WHERE venue='strike' AND two_sided=1 AND ts>=? AND ts<=? ORDER BY ts LIMIT 1",
+                           (ts + horizon_ms, ts + horizon_ms + 6000)).fetchone()
+        if not pre or not post or not pre[0]:
+            continue
+        sign = 1 if maker_side == "sell" else -1  # a taker buy lifts a resting sell
+        moves.append((ts, sign * (post[0] - pre[0]) / pre[0] * 1e4))
+    if not moves:
+        return {"horizon_ms": horizon_ms, "n_takers": len(takers), "n_measured": 0, "mean_bps": None, "median_bps": None,
+                "share_continued": None, "hourly": []}
+    vals = sorted(m for _, m in moves)
+    hourly = {}
+    for ts, m in moves:
+        hourly.setdefault((ts // STEPS["hour"]) * STEPS["hour"], []).append(m)
+    return {"horizon_ms": horizon_ms, "n_takers": len(takers), "n_measured": len(moves),
+            "mean_bps": sum(vals) / len(vals), "median_bps": vals[len(vals) // 2],
+            "share_continued": sum(1 for v in vals if v > 0) / len(vals),
+            "hourly": [{"t": t, "mean_bps": sum(v) / len(v), "n": len(v)} for t, v in sorted(hourly.items())]}
