@@ -302,21 +302,3 @@ docs/DATASET.md    dataset schema
 deploy/            systemd units          Dockerfile, docker-compose.yml
 FEEDBACK.md        the pain point we found in Strike's L3 design, with evidence and a proposed fix
 ```
-
----
-
-## 8. Honest limits
-
-- **History starts when the recorder started**, and the laptop it ran on slept twice, so some hours are marked gaps. Hours recorded and
-  coverage are shown on the scorecard and at `/api/coverage`.
-- **BTC-USD only**, because that is the only symbol with public L3.
-- **Strike volume is very thin.** Fills are rare (about 1,000 in the dataset), so cancel/fill and depth resilience rest on small samples.
-  Sample sizes are printed beside every number.
-- **Benchmarks are different instruments.** Binance is the USD-M perpetual when reachable and otherwise the public spot mirror (every
-  switch is logged and shown). Hyperliquid streams only 20 levels per side, so wide depth bands are `n/a`.
-- **Strike's book is sampled between refresh bursts.** Strike refreshes its whole book once a second as ~190 unbracketed events; sampling
-  mid-burst understated Strike badly (spread uptime 86% vs 100%). Strike samples are taken at quiet moments and the history was rebuilt from
-  the raw events. This is the finding written up in [FEEDBACK.md](FEEDBACK.md).
-- **Visible liquidity only.** L3 shows resting orders, not intent; orders can disappear before a taker reaches them. That last point is the
-  subject of [FEEDBACK.md](FEEDBACK.md).
-- **The designer is a model**, not a forecast, and says so on the page.
