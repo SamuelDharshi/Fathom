@@ -20,5 +20,9 @@ while ($true) {
     if (-not (Test-Url 'http://localhost:3002/')) {
         Start-Process -WindowStyle Hidden -WorkingDirectory "$root\web" -FilePath cmd.exe -ArgumentList '/c', 'npx next start -p 3002'
     }
+    # public tunnel to the API (India region keeps latency low); the free static domain is reused on restart
+    if (-not (Get-Process ngrok -ErrorAction SilentlyContinue)) {
+        Start-Process -WindowStyle Hidden -FilePath ngrok -ArgumentList 'http', '8000', '--region=in', '--log=stdout'
+    }
     Start-Sleep -Seconds 20
 }
