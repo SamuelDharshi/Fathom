@@ -23,8 +23,8 @@ HEARTBEAT_SECONDS = 5
 FLUSH_SECONDS = 0.5
 SAMPLE_SECONDS = 2
 # Strike refreshes its whole book once a second in one burst of ~190 cancel/open events. Sampling mid-burst
-# sees a half-empty book, so L3 samples wait until the stream has been quiet this long.
-QUIET_SECONDS = 0.05
+# sees a half-empty book, so L3 samples are taken only at a gap of at least QUIET_MS in Strike's own event timestamps.
+QUIET_MS = 50  # exchange-time gap that separates two refresh bursts
 MAX_SAMPLE_WAIT = 5
 
 # API

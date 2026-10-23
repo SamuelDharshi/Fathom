@@ -80,7 +80,8 @@ async def run_session(con, client: httpx.AsyncClient, state: dict) -> None:
             batch: list[dict] = []
             batch_recv = 0
             last_exch = snap["timestamp"]
-            last_flush = last_sample = last_cp = last_msg = time.monotonic()
+            last_flush = last_sample = last_cp = time.monotonic()
+            last_ev_ts = snap["timestamp"]  # exchange time of the last applied event
             if db.get_meta(con, "quiescent_sampling_since") is None:
                 db.set_meta(con, "quiescent_sampling_since", db.now_ms())
             cp_task = None
@@ -111,8 +112,13 @@ async def run_session(con, client: httpx.AsyncClient, state: dict) -> None:
                             raise Resync(f"server error: {msg['error']}")
                         if msg.get("type") == "l3_update":
                             seq = msg["sequence"]
-                            last_msg = time.monotonic()
                             if check_sequence(seq, expected):
+                                # sample on Strike's own clock: if this event starts a new burst (>= QUIET_MS after the previous
+                                # one) the book is exactly between two refreshes, so sample it BEFORE applying the event
+                                if time.monotonic() - last_sample >= config.SAMPLE_SECONDS and msg["timestamp"] - last_ev_ts >= config.QUIET_MS:
+                                    last_sample = time.monotonic()
+                                    write_sample(con, book, last_ev_ts)
+                                last_ev_ts = msg["timestamp"]
                                 batch.append(msg)
                                 batch_recv = recv_ts
                                 expected += 1
@@ -127,8 +133,8 @@ async def run_session(con, client: httpx.AsyncClient, state: dict) -> None:
                     due = now - last_flush
                     if (batch and due >= config.FLUSH_SECONDS) or len(batch) >= 500 or due >= config.HEARTBEAT_SECONDS:
                         flush()
-                    # sample between refresh bursts (book quiet for QUIET_SECONDS), but never starve past MAX_SAMPLE_WAIT
-                    if now - last_sample >= config.SAMPLE_SECONDS and (now - last_msg >= config.QUIET_SECONDS or now - last_sample >= config.MAX_SAMPLE_WAIT):
+                    # fallback only: never go MAX_SAMPLE_WAIT without a sample (the exact rule above normally fires first)
+                    if now - last_sample >= config.MAX_SAMPLE_WAIT:
                         last_sample = now
                         write_sample(con, book, last_exch)
                     if now - last_cp >= config.CHECKPOINT_SECONDS and (cp_task is None or cp_task.done()):
