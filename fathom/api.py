@@ -6,7 +6,7 @@ import time
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from . import config, db, designer, export, metrics
@@ -29,6 +29,12 @@ def parse_step(step: str):
     if step not in metrics.STEPS:
         raise HTTPException(400, f"step must be one of {list(metrics.STEPS)}")
     return step
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """The tunnel URL is the API, not the website: send browsers to the live scorecard."""
+    return RedirectResponse(os.environ.get("FRONTEND_URL") or "https://fathom-strike.vercel.app", status_code=307)
 
 
 @app.get("/api/health")
