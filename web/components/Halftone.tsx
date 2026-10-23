@@ -42,6 +42,9 @@ export default function Halftone({ mode = "noise", seed = 1, book, px = 2, ink =
     const waves = Array.from({ length: 3 }, () => ({ kx: 2 + r() * 6, ky: 2 + r() * 6, p: r() * 6.28, a: 0.08 + r() * 0.1, sp: 0.2 + r() * 0.4 }));
     const rgb = (c: string) => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
     const A = rgb(ink);
+    // pointer interaction, ink only: dots get denser around the cursor and the effect fades behind it
+    const ptr = { x: -1, y: -1, lx: -1, ly: -1 };
+    let trail = new Float32Array(0), trailLive = false;
     let w = 0, h = 0, img: ImageData | null = null, field = new Float32Array(0);
     let visible = true, raf = 0, last = 0, t = r() * 10;
 
@@ -51,6 +54,35 @@ export default function Halftone({ mode = "noise", seed = 1, book, px = 2, ink =
       w = Math.max(8, Math.floor(box.width / eff)); h = Math.max(8, Math.floor(box.height / eff));
       canvas.width = w; canvas.height = h;
       img = canvas.getContext("2d")!.createImageData(w, h);
+      trail = new Float32Array(w * h); trailLive = false;
+    };
+
+    const stamp = (cx: number, cy: number) => {
+      const R = h * 0.22, sg = R * 0.55, reach = Math.ceil(R * 1.7);
+      const x0 = Math.max(0, Math.floor(cx - reach)), x1 = Math.min(w - 1, Math.ceil(cx + reach));
+      const y0 = Math.max(0, Math.floor(cy - reach)), y1 = Math.min(h - 1, Math.ceil(cy + reach));
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const g = Math.exp(-(((x - cx) ** 2 + (y - cy) ** 2) / (2 * sg * sg)));
+        const k = y * w + x;
+        if (g > trail[k]) trail[k] = g;
+      }
+      trailLive = true;
+    };
+
+    const stepTrail = () => {
+      if (ptr.x >= 0) {
+        const cx = ptr.x * w, cy = ptr.y * h;
+        if (ptr.lx < 0) stamp(cx, cy);
+        else {
+          const dist = Math.hypot(cx - ptr.lx, cy - ptr.ly), n = Math.max(1, Math.ceil(dist / (h * 0.06)));
+          for (let i = 1; i <= n; i++) stamp(ptr.lx + ((cx - ptr.lx) * i) / n, ptr.ly + ((cy - ptr.ly) * i) / n);
+        }
+        ptr.lx = cx; ptr.ly = cy;
+      } else ptr.lx = -1;
+      if (!trailLive) return;
+      let live = false;
+      for (let k = 0; k < trail.length; k++) { const v = trail[k] * 0.972; trail[k] = v < 0.03 ? 0 : v; if (trail[k] > 0) live = true; }
+      trailLive = live;
     };
 
     const bookField = () => {
@@ -100,7 +132,7 @@ export default function Halftone({ mode = "noise", seed = 1, book, px = 2, ink =
       for (let y = 0; y < h; y++) {
         const row = (y >> 1) * cw;
         for (let x = 0; x < w; x++) {
-          const v = field[row + (x >> 1)];
+          const v = field[row + (x >> 1)] + trail[y * w + x] * 1.1;   // pointer pushes extra ink into the dither
           const thr = (BAYER8[y & 7][x & 7] + 0.5) / 64;
           const i = (y * w + x) * 4;
           data[i] = ir; data[i + 1] = ig; data[i + 2] = ib; data[i + 3] = v > thr ? 255 : 0;
@@ -115,15 +147,19 @@ export default function Halftone({ mode = "noise", seed = 1, book, px = 2, ink =
     ro.observe(parent);
     const io = new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, { threshold: 0 });
     io.observe(parent);
+    const move = (e: PointerEvent) => { const b = parent.getBoundingClientRect(); ptr.x = (e.clientX - b.left) / b.width; ptr.y = (e.clientY - b.top) / b.height; };
+    const leave = () => { ptr.x = -1; };
+    if (!reduce) { parent.addEventListener("pointermove", move); parent.addEventListener("pointerleave", leave); }
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
       if (!visible || now - last < 1000 / fps) return;
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now; t += dt;
+      stepTrail();
       draw();
     };
     if (!reduce) raf = requestAnimationFrame(loop);
-    return () => { cancelAnimationFrame(raf); ro.disconnect(); io.disconnect(); };
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); io.disconnect(); parent.removeEventListener("pointermove", move); parent.removeEventListener("pointerleave", leave); };
   }, [mode, seed, px, ink, fps]);
 
   return <canvas ref={ref} className="halftone" aria-hidden="true" />;
