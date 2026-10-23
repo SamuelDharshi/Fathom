@@ -264,6 +264,7 @@ values you supply.
 python -m fathom.verify           # sequence continuity, replay vs REST checkpoints, bookTicker cross-check
 python -m fathom.verify --live    # sync a fresh book, run 30 s, diff against a brand-new REST snapshot
 python -m pytest tests            # arithmetic tests + tests on recorded real data
+node web/scripts/make_demo.mjs <url> demo   # records the captioned demo video of the live site (real data)
 python -m fathom.analyze_churn    # reproduces every number quoted in FEEDBACK.md
 ```
 
