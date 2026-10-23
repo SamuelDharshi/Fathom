@@ -9,11 +9,13 @@ export default function Chart({
   series,
   fmt,
   log,
+  signed,
 }: {
   data: Record<string, number | null>[];
   series: Series[];
   fmt: (v: number) => string;
   log?: boolean;
+  signed?: boolean;
 }) {
   if (!data.length) return <div className="empty">No data in this range yet.</div>;
   return (
@@ -28,7 +30,7 @@ export default function Chart({
             width={64}
             tickFormatter={fmt}
             scale={log ? "log" : "auto"}
-            domain={log ? ["auto", "auto"] : [0, "auto"]}
+            domain={log || signed ? ["auto", "auto"] : [0, "auto"]}
             allowDataOverflow
           />
           <Tooltip

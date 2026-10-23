@@ -59,8 +59,10 @@ export type CancelFill = {
 export type Scorecard = {
   as_of: number;
   window_minutes: number;
+  compare: string;
+  compare_available: boolean;
   venues: Record<Venue, { current: Window | null; previous: Window | null }>;
-  m4_strike: { current: CancelFill; previous: CancelFill };
+  m4_strike: { current: CancelFill; previous: CancelFill | null };
   since_start: Record<Venue, Window | null>;
   m4_since_start: CancelFill;
   notes: string[];
