@@ -302,3 +302,26 @@ docs/DATASET.md    dataset schema
 deploy/            systemd units          Dockerfile, docker-compose.yml
 FEEDBACK.md        the pain point we found in Strike's L3 design, with evidence and a proposed fix
 ```
+
+---
+
+## 8. Honest limits
+
+- **The PRD's data targets were not met.** The recorder started on Oct 22 at 00:54 IST. By Oct 23 10:36 IST that is 33.7 hours of wall-clock
+  time, of which **11.3 hours were actually recorded (about 33%)**. The rest is 22.4 hours of marked gaps: one 1.2 h network drop and two
+  laptop sleeps (12.9 h and 7.8 h). The PRD asked for 30+ hours recorded at 95%+ uptime. History cannot be backfilled because Strike has no
+  replay endpoint. Live figures are at `/api/coverage` and on the scorecard; no gap is ever interpolated.
+- **BTC-USD only**, because that is the only symbol with public L3.
+- **Strike volume is very thin.** The dataset holds about 1,070 fills, so cancel/fill and depth resilience (M5) rest on small samples. Sample
+  sizes are printed beside every number.
+- **The Binance series mixes two instruments.** It is the USD-M perpetual (BTCUSDT) except from about Oct 22 19:26 IST to Oct 23 10:30 IST, when
+  Binance's main domains were unreachable from the recorder host and it fell back to the public spot mirror. Each switch is logged and shown on the
+  scorecard. Hyperliquid streams only 20 levels per side, so wide depth bands are `n/a`.
+- **Strike's book is sampled between refresh bursts.** Strike refreshes its whole book once a second as about 190 unbracketed events, and
+  sampling mid-burst understated Strike (spread uptime 86% instead of 100%). Strike samples are now taken at quiet moments, and Strike's history
+  was re-derived from the raw stored events (`python -m fathom.resample`). Benchmark samples are live and were not rebuilt. Evidence and the proposed
+  fix are in [FEEDBACK.md](FEEDBACK.md).
+- **Visible liquidity only.** L3 shows resting orders, not intent, and an order can be cancelled before a taker reaches it. Strike's quotes
+  are refreshed every second (median resting time 993 ms), so displayed depth reflects the refresh schedule as much as committed capital
+  ([FEEDBACK.md](FEEDBACK.md), section 5).
+- **The designer is a model**, not a forecast, and says so on the page.
