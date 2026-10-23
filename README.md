@@ -4,6 +4,8 @@
 > Fathom records Strike's public **L3** (every resting order) BTC-USD feed around the clock, measures its liquidity quality the
 > same way as Binance and Hyperliquid, and publishes the result as a live scorecard, an open dataset and a read-only API.
 
+**Live scorecard:** https://fathom-strike.vercel.app  |  **Demo video (2 min 43 s):** [fathom-demo.webm](https://github.com/SamuelDharshi/Fathom/releases/download/demo-v1/fathom-demo.webm)  |  **Strike feedback:** [FEEDBACK.md](FEEDBACK.md)
+
 Everything here runs on **live public market data**. There is no mock data, no simulated order book and no seeded numbers.
 The one model in the product (the incentive designer) is a clearly labelled what-if. See [FEEDBACK.md](FEEDBACK.md) for the
 architectural pain point in Strike's L3 feed that this project surfaced, with evidence and a proposed fix.
