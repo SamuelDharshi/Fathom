@@ -1,7 +1,10 @@
 export const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// ngrok free tunnels answer browsers with an interstitial page unless this header is present
+export const TUNNEL_HEADERS: Record<string, string> = API.includes("ngrok") ? { "ngrok-skip-browser-warning": "1" } : {};
+
 export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${API}${path}`, { cache: "no-store", ...init });
+  const r = await fetch(`${API}${path}`, { cache: "no-store", ...init, headers: { ...TUNNEL_HEADERS, ...(init?.headers as Record<string, string> | undefined) } });
   if (!r.ok) {
     let msg = `${r.status}`;
     try {

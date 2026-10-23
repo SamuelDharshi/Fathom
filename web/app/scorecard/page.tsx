@@ -54,22 +54,16 @@ export default function ScorecardPage() {
   const [err, setErr] = useState<string | null>(null);
   const step: Step = stepChoice ?? defaultStep(range);
 
-  const load = useCallback(async () => {
-    try {
-      const [s, c, r, t, v, ser] = await Promise.all([
-        getJson<Scorecard>(`/api/scorecard?window_minutes=${win}&compare=${compare}`),
-        getJson<{ points: CF }>(`/api/cancel_fill?step=${step}&hours=${range}`),
-        getJson<Resilience>(`/api/resilience?hours=${Math.max(range, 48)}`),
-        getJson<Tox>(`/api/toxicity?hours=${Math.max(range, 48)}`),
-        getJson<Coverage>("/api/coverage"),
-        Promise.all(VENUES.map((x) => getJson<{ points: Point[] }>(`/api/series?venue=${x}&step=${step}&hours=${range}`))),
-      ]);
-      setSc(s); setCf(c.points); setRes(r); setTox(t); setCov(v);
-      setSeries({ strike: ser[0].points, binance: ser[1].points, hyperliquid: ser[2].points });
-      setErr(null);
-    } catch (e) {
-      setErr((e as Error).message);
-    }
+  const load = useCallback(() => {
+    // core panels render as soon as they arrive; the heavier ones fill in afterwards
+    const fail = (e: Error) => setErr(e.message);
+    getJson<Scorecard>(`/api/scorecard?window_minutes=${win}&compare=${compare}`).then((s) => { setSc(s); setErr(null); }).catch(fail);
+    Promise.all(VENUES.map((x) => getJson<{ points: Point[] }>(`/api/series?venue=${x}&step=${step}&hours=${range}`)))
+      .then((ser) => setSeries({ strike: ser[0].points, binance: ser[1].points, hyperliquid: ser[2].points })).catch(fail);
+    getJson<{ points: CF }>(`/api/cancel_fill?step=${step}&hours=${range}`).then((c) => setCf(c.points)).catch(() => {});
+    getJson<Resilience>(`/api/resilience?hours=${Math.max(range, 48)}`).then(setRes).catch(() => {});
+    getJson<Tox>(`/api/toxicity?hours=${Math.max(range, 48)}`).then(setTox).catch(() => {});
+    getJson<Coverage>("/api/coverage").then(setCov).catch(() => {});
   }, [win, range, step, compare]);
 
   useEffect(() => {
