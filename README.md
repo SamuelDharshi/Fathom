@@ -1,7 +1,7 @@
 # Fathom: the Strike market quality index
 
 <p align="center">
-  <img src="docs/images/fathom-cover.png" alt="Fathom: the Strike market quality index. How deep is Strike's book?" width="900">
+  <img src="docs/images/fathom-title-slide.png" alt="Fathom: the Strike market quality index. How deep is Strike's book?" width="900">
 </p>
 
 > **How deep is Strike's book?**
