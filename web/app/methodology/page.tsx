@@ -19,7 +19,7 @@ export default function Methodology() {
       </ul>
 
       <h2>Sampling and windows</h2>
-      <p>Every 2 seconds each venue&apos;s local book is sampled and the metrics below are computed from the full book. Headline numbers average the samples in the chosen window. Charts use 1-minute or hourly buckets. Mid price = (best bid + best ask) / 2. <b>Strike samples are taken between refresh bursts:</b> Strike&apos;s L3 feed refreshes the whole book once a second as about 190 separately sequenced cancel and open events with no batch boundary, so a sample taken mid-burst sees a half-empty book. Strike samples are therefore taken only when the stream has been quiet for 50 ms, and the history was re-derived from the stored raw events the same way. An earlier version of this scorecard sampled at arbitrary instants and understated Strike (spread uptime 86% against 100%, worst-case depth $4.7k against $315k). Details and evidence are in FEEDBACK.md. A sample with an empty side or a crossed book counts as not two-sided.</p>
+      <p>Every 2 seconds each venue&apos;s local book is sampled and the metrics below are computed from the full book. Headline numbers average the samples in the chosen window. Charts use 1-minute or hourly buckets. Mid price = (best bid + best ask) / 2. <b>Strike samples are taken between refresh bursts:</b> Strike&apos;s L3 feed refreshes the whole book once a second as about 190 separately sequenced cancel and open events with no batch boundary, so a sample taken mid-burst sees a half-empty book. Strike samples are therefore taken only at a gap of at least 50 ms in Strike&apos;s own event timestamps (the book is then exactly between two refreshes), and the history was re-derived from the stored raw events the same way. An earlier version of this scorecard sampled at arbitrary instants and understated Strike (spread uptime 86% against 100%, worst-case depth $4.7k against $315k). Details and evidence are in FEEDBACK.md. A sample with an empty side or a crossed book counts as not two-sided.</p>
 
       <h2>Metrics</h2>
       <h3>M1 Spread uptime</h3>
@@ -32,6 +32,9 @@ export default function Methodology() {
       <p>Cancelled size divided by filled size from L3 <code>cancel</code>, <code>partial_fill</code> and <code>full_fill</code> events. When there are cancels but no fills the ratio is undefined and the page says so. Counts of placed, cancelled and filled orders are shown alongside.</p>
       <h3>M5 Depth resilience (Strike only)</h3>
       <p>For each taker order above $10k (fills grouped by <code>taker_order_id</code>), the time until M2 depth within 10 bps on the side it hit is back to 80% of its level just before the trade. Resolution is the 2 second sample. Waits longer than 10 minutes count as not recovered.</p>
+
+      <h3>M6 Flow toxicity (Strike only)</h3>
+      <p>For every taker order, the mid-price move over the next 10 seconds, signed in the taker&apos;s direction (positive means the price kept moving the taker&apos;s way, so resting orders were picked off), averaged over all taker orders. The mid before the trade is the last 2-second Strike sample at or before it; the mid after is the first sample at least 10 seconds later. It rests on about a thousand taker orders, so read it as an average.</p>
 
       <h2>Incentive designer</h2>
       <p>A transparent parametric model applied to Strike&apos;s latest recorded book: participation = min(1, rebate / adverse-selection cost); added size per side = Quoters × quote size × participation, placed at the touch; metrics recomputed with the scorecard&apos;s own functions. It is a what-if tool and not a forecast of behaviour.</p>

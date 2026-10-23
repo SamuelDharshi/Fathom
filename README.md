@@ -165,8 +165,8 @@ Every number is shown with its sample count; recording gaps are excluded, never 
 | M3 | Slippage at size | Cost vs mid of a $10k / $50k / $100k market order, by walking the book | L3 book | L2 book |
 | M4 | Cancel / fill | Cancelled size over filled size, plus counts of placed, cancelled, filled | L3 events | not available |
 | M5 | Depth resilience | Time for depth within 10 bps to recover to 80% after a taker order above $10k | L3 events | not built |
+| M6 | Flow toxicity | Average mid-price move in the taker's direction over the 10 s after each taker order | L3 events + Strike samples | not available |
 
-M6 (flow toxicity) was cut first, as the PRD allowed.
 
 ---
 
@@ -220,11 +220,13 @@ curl -O http://localhost:8000/api/dataset/gaps.parquet
 | `GET /api/health` | per-feed heartbeat age and ok flag |
 | `GET /api/coverage` | hours recorded, sample coverage and gap time per venue |
 | `GET /api/gaps` | every marked gap (venue, start, end, reason) |
-| `GET /api/scorecard?window_minutes=` | latest and previous window for every venue, M4, and since-start values |
+| `GET /api/scorecard?window_minutes=&compare=prev\|day\|week` | latest window and its comparison (previous window, 24 h or 7 days earlier) for every venue, M4, and since-start values |
 | `GET /api/series?venue=&step=&hours=` | time series of M1 to M3 |
 | `GET /api/query?start=&end=&step=` | the read-only metric-range endpoint from the PRD |
 | `GET /api/cancel_fill?step=&hours=` | M4 series |
 | `GET /api/resilience?hours=&min_usd=` | M5 events and median recovery |
+| `GET /api/toxicity?hours=&horizon_s=` | M6: mean, median and hourly series of the post-trade mid move |
+| `GET /api/alerts` | feed-stale and recovered alerts (also POSTed to `ALERT_WEBHOOK_URL` if set) |
 | `GET /api/latest`, `GET /api/book` | latest sample per venue; latest Strike book levels |
 | `POST /api/designer` | the what-if model on the current recorded book |
 | `GET /api/dataset`, `/api/dataset/{file}`, `/api/dataset/schema` | Parquet export and schema |
@@ -318,10 +320,26 @@ FEEDBACK.md        the pain point we found in Strike's L3 design, with evidence 
   Binance's main domains were unreachable from the recorder host and it fell back to the public spot mirror. Each switch is logged and shown on the
   scorecard. Hyperliquid streams only 20 levels per side, so wide depth bands are `n/a`.
 - **Strike's book is sampled between refresh bursts.** Strike refreshes its whole book once a second as about 190 unbracketed events, and
-  sampling mid-burst understated Strike (spread uptime 86% instead of 100%). Strike samples are now taken at quiet moments, and Strike's history
+  sampling mid-burst understated Strike (spread uptime 86% instead of 100%). Strike samples are now taken between bursts, using Strike's own event timestamps, and Strike's history
   was re-derived from the raw stored events (`python -m fathom.resample`). Benchmark samples are live and were not rebuilt. Evidence and the proposed
   fix are in [FEEDBACK.md](FEEDBACK.md).
 - **Visible liquidity only.** L3 shows resting orders, not intent, and an order can be cancelled before a taker reaches it. Strike's quotes
   are refreshed every second (median resting time 993 ms), so displayed depth reflects the refresh schedule as much as committed capital
   ([FEEDBACK.md](FEEDBACK.md), section 5).
 - **The designer is a model**, not a forecast, and says so on the page.
+- **M6 is Strike-only and coarse.** The price move uses the 2-second book samples (the last one before the trade and the first one at least 10 s
+  after), over about 1,000 taker orders, so treat it as an average, not a per-trade measurement.
+
+---
+
+## 9. Live deployment
+
+| Piece | Where |
+| --- | --- |
+| Frontend | https://fathom-strike.vercel.app (Next.js on Vercel, built with `NEXT_PUBLIC_API_URL` pointing at the API) |
+| API + recorder | the recorder machine, exposed through an ngrok HTTPS tunnel (India region) |
+| Keep-alive | `supervise_stack.ps1` restarts the recorder, API, website and tunnel; sleep and hibernate are disabled on the host |
+
+A tunnel to a laptop is not a production setup: the live numbers are only as available as that machine. The same code runs on any VPS with
+`docker compose up -d` or the systemd units in `deploy/`, which is how it should be run long term. Set `ALERT_WEBHOOK_URL` in `.env` to get
+a Discord or Slack message when a feed goes stale.

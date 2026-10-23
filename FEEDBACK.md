@@ -16,8 +16,8 @@ and every fill appears on the trade tape. But it has one design gap that undermi
 > Any consumer that reads the book while a burst is half-applied sees a half-empty book.
 
 We measured the cost of that on ourselves: our first-generation scorecard read Strike's spread uptime as **86%**, its worst-case depth
-as **$4.7k** and a $50k order as **4 to 8 bps**. Re-derived correctly from the same raw events, the figures are **100%**, **$315k** and
-**0.68 bps**. Strike's book was far healthier than any naive consumer of its own public feed would conclude.
+as **$4.7k** and a $50k order as **4 to 8 bps**. Re-derived correctly from the same raw events, the figures are **99.99%**, **$315k** and
+**0.67 bps**. Strike's book was far healthier than any naive consumer of its own public feed would conclude.
 
 The fix is small and additive: a batch marker, an atomic `replace` action (the `modify` slot is already reserved), a bounded replay
 endpoint and a periodic book checksum. Section 6 specifies it.
@@ -79,11 +79,11 @@ All numbers from live Strike mainnet data recorded by Fathom (`python -m fathom.
 
 | Strike metric | Sampled at arbitrary instants (old) | Sampled between bursts (correct) |
 | --- | --- | --- |
-| Spread uptime (two-sided, <= 5 bps) | 86.3% | **100.0%** |
-| Samples with spread > 5 bps | 13.1% | **0.0%** |
-| Depth within 10 bps, 5th percentile | **$4,750** | **$315,071** |
+| Spread uptime (two-sided, <= 5 bps) | 86.3% | **99.99%** |
+| Samples with spread > 5 bps | 13.1% | **0.01%** |
+| Depth within 10 bps, 5th percentile | **$4,750** | **$315,092** |
 | Depth within 10 bps, median | $341,116 | $345,157 |
-| Slippage, $50k market order | ~4 to 8 bps | **0.68 bps** |
+| Slippage, $50k market order | ~4 to 8 bps | **0.67 bps** |
 
 Two further observations follow from the same data. First, depth within 10 bps sits at **$349,0xx with almost no variance**: the same
 ladder is re-posted every second. Second, only about 0.01% of events are trades. That is not a criticism of the quoting, it is a
@@ -203,13 +203,16 @@ return `Retry-After` on handshake `503`s.
 
 We cannot fix Strike's feed, so we fixed ourselves:
 
-1. **Burst-aware sampling** (`fathom/strike_l3.py`): the live recorder samples the local book only when the stream has been quiet for 50 ms.
-2. **History rebuilt from raw events** (`fathom/resample.py`): replayed all 18 recorded sessions from their start snapshots and re-derived
-   **16,079** Strike samples at quiet moments, replacing the artifact-affected ones. The raw events were never modified.
+1. **Burst-aware sampling on Strike's own clock** (`fathom/strike_l3.py`): the live recorder takes a sample just before any event that
+   arrives at least 50 ms (in Strike's event timestamps) after the previous one, which is exactly the gap between two refresh bursts. Our first
+   version waited for 50 ms of *arrival* silence instead; network jitter let about 5% of those samples land mid-burst again (spread over
+   5 bps in 66 of 1,288 samples), so we switched to the exchange timestamps. After the switch: 0 of the live samples are mid-burst.
+2. **History rebuilt from raw events** (`fathom/resample.py`): replayed all 31 recorded sessions from their start snapshots with the same rule and
+   re-derived **17,375** Strike samples, replacing the artifact-affected ones. The raw events were never modified.
 3. **Disclosure**: the methodology page and the dataset notes now state this, with the before and after numbers above.
 4. **Framing fix**: the market-data recorder now splits multi-message frames.
 
-Measured effect on the Strike series: spread uptime 86.3% -> 100.0%, 5th-percentile depth $4,750 -> $315,071, $50k slippage 4 to 8 bps -> 0.68 bps.
+Measured effect on the Strike series: spread uptime 86.3% -> 100.0%, 5th-percentile depth $4,750 -> $315,092, $50k slippage 4 to 8 bps -> 0.68 bps.
 Benchmarks are unaffected: Binance and Hyperliquid deliver whole-book snapshots or atomic diffs.
 
 ---
@@ -241,6 +244,6 @@ The proposed field names are suggestions, not a spec Strike has reviewed.
 
 ```bash
 python -m fathom.analyze_churn     # every number in section 4
-python -m fathom.resample          # rebuild Strike samples from raw events at quiet moments
+python -m fathom.resample          # rebuild Strike samples from raw events between refresh bursts
 python -m fathom.verify            # replay vs REST snapshots, trade tape cross-check
 ```

@@ -22,7 +22,7 @@ All timestamps are Unix epoch milliseconds. Decimal values from exchanges are ke
 `seq` is the Strike L3 sequence or Binance update id. `exch_ts` is the exchange timestamp when available.
 
 **Strike rows are burst-aware.** Strike's L3 feed refreshes the whole book once a second as a burst of about 190 events, so Strike samples are
-taken between bursts (>= 50 ms of silence). Rows before `meta.quiescent_sampling_since` were rebuilt from `l3_events` with the same rule
+taken between bursts (a gap of >= 50 ms in Strike's event timestamps). Rows before `meta.quiescent_sampling_since` were rebuilt from `l3_events` with the same rule
 (`python -m fathom.resample`); for those rows `ts` equals `exch_ts`. Benchmark venues are sampled live. See FEEDBACK.md.
 
 ## strike_trades / strike_ticker
@@ -30,6 +30,9 @@ Public trade tape and best bid/ask (at most one row per second) from `wss://api.
 
 ## gaps
 `venue`, `start_ms`, `end_ms` (null while open), `reason`. During a gap the venue produced no samples and no events; do not interpolate across it. `scheduled_resync` gaps for Binance are the periodic book rebuilds (a few seconds).
+
+## alerts
+`ts`, `venue`, `kind` (stale or recovered), `message`, `delivered`. Written when a feed heartbeat goes stale and when it recovers.
 
 ## Use with care
 History starts when the recorder started. Benchmarks are different instruments. See the methodology page.
