@@ -85,6 +85,10 @@ All numbers from live Strike mainnet data recorded by Fathom (`python -m fathom.
 | Depth within 10 bps, median | $341,116 | $345,157 |
 | Slippage, $50k market order | ~4 to 8 bps | **0.67 bps** |
 
+**Independent confirmation from Strike's own bookTicker feed.** The share of our samples whose best bid and ask match a `bookTicker` message
+within 1.5 s was **68%** when we sampled at arbitrary instants and is **94% (16,356 of 17,417)** with burst-aware sampling. The remaining
+6% is consistent with `bookTicker` being throttled to one message per 100 ms and with our once-per-second storage of it.
+
 Two further observations follow from the same data. First, depth within 10 bps sits at **$349,0xx with almost no variance**: the same
 ladder is re-posted every second. Second, only about 0.01% of events are trades. That is not a criticism of the quoting, it is a
 statement about signal: **99.99% of what the feed carries is the refresh ritual, not market activity.**
