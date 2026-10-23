@@ -8,6 +8,39 @@ import itertools
 from . import config, db
 
 
+def neutral_refreshes(con) -> None:
+    """How often does a refresh burst leave the price-level book unchanged? Replays 120k events from a checkpoint."""
+    from .book import L3Book
+
+    row = con.execute("SELECT id, session, last_sequence FROM snapshots WHERE kind='checkpoint' ORDER BY id DESC LIMIT 1 OFFSET 2").fetchone()
+    if not row:
+        return
+    sid, session, seq = row
+    book = L3Book(db.load_snapshot(con.execute("SELECT body FROM snapshots WHERE id=?", (sid,)).fetchone()[0]))
+    keys = ("sequence", "action", "order_id", "taker_order_id", "side", "price", "delta_size", "remaining_size", "trade_id", "timestamp")
+    rows = con.execute("SELECT sequence,action,order_id,taker_order_id,side,price,delta_size,remaining_size,trade_id,ts FROM l3_events "
+                       "WHERE session=? AND sequence>? ORDER BY sequence LIMIT 120000", (session, seq)).fetchall()
+    prev, last_ts, bursts, same, changed = None, None, 0, 0, []
+    for r in rows:
+        ev = dict(zip(keys, r))
+        if last_ts is not None and ev["timestamp"] - last_ts >= 50:  # quiet boundary between bursts
+            cur = (dict(book.levels["buy"]), dict(book.levels["sell"]))
+            if prev is not None:
+                bursts += 1
+                if cur == prev:
+                    same += 1
+                else:
+                    changed.append(sum(1 for i in (0, 1) for p in set(cur[i]) | set(prev[i]) if cur[i].get(p) != prev[i].get(p)))
+            prev = cur
+        book.apply(ev)
+        last_ts = ev["timestamp"]
+    changed.sort()
+    print(f"\n== Are refresh bursts state-neutral? ({len(rows):,} events, {bursts} bursts) ==")
+    print(f"  price-level book identical before and after the burst: {same} of {bursts} ({100 * same / max(bursts, 1):.1f}%)")
+    if changed:
+        print(f"  in the other {len(changed)} bursts the median number of price levels that changed is {changed[len(changed) // 2]} (a burst is ~190 events)")
+
+
 def main() -> None:
     con = db.connect(config.DB_PATH, readonly=True)
     hi = con.execute("SELECT MAX(ts) FROM l3_events").fetchone()[0]
@@ -65,6 +98,7 @@ def main() -> None:
     q = lambda p: d[int(len(d) * p)]
     print(f"\n== Depth within 10 bps seen by 2 s samples, last 24 h (n={len(d):,}) ==")
     print(f"  p5 ${q(.05):,.0f} | p50 ${q(.5):,.0f} | p95 ${q(.95):,.0f}  (p95/p5 = {q(.95) / max(q(.05), 1):.0f}x)")
+    neutral_refreshes(con)
     since = db.get_meta(con, "quiescent_sampling_since")
     if since:
         s = int(since)

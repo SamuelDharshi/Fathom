@@ -71,6 +71,8 @@ All numbers from live Strike mainnet data recorded by Fathom (`python -m fathom.
 | Orders cancelled within 5 s of being placed | **100%** |
 | Run lengths in the event stream (60 s) | median run **95**; longest cancel run **95**, longest open run **95** |
 | Refresh bursts | median **190 events** over a median **1 ms** of exchange time, about one per second |
+| Refresh bursts that leave the aggregated price-level book **identical** (905 bursts) | **32%** |
+| Price levels that actually change in the other bursts (median) | **11** levels, from a burst of **190** events |
 | Feed volume | about **14 million events per day** for a market with about 1,000 fills in 33 hours |
 | `/ws/price` frames carrying several newline-separated JSON messages | **10 times** in our logs (not stated in the docs; see 8) |
 | Handshake `503 Service Unavailable` on `/ws/price` and `/ws/l3` | **9** and **3** times in our logs |
@@ -112,7 +114,11 @@ The surface bug is "bursts are not bracketed". The real pain point is what that 
    and snapshots are limited to 10 per second per IP. Every consumer also pays for about 14M events/day (roughly 3 GB/day of JSON by
    our estimate at about 230 bytes a message) to learn very little. Each of our 7 abnormal disconnects lost the events between the
    drop and the fresh snapshot; a replay window of even a few minutes would have healed all of them without a gap.
-4. **A one-second quote lifetime is itself a liquidity-quality fact** that deserves to be explicit. With p50 resting time of 993 ms,
+4. **Most of the stream carries no information.** Across 905 bursts, 32% left the price-level book exactly as it was, and in the rest a median of 11 of
+   about 240 price levels moved. The feed pays for 190 events to communicate a handful of changes, because it has no way to say "renew", "amend" or
+   "nothing changed". The one-second resting time (median 993 ms) is consistent with a time-in-force or refresh loop, but the feed gives consumers no
+   field to tell.
+5. **A one-second quote lifetime is itself a liquidity-quality fact** that deserves to be explicit. With p50 resting time of 993 ms,
    "displayed depth" is a property of the *refresh schedule*, not of committed capital, and a taker cannot tell the difference from L3.
 
 What we cannot say, and do not claim: who is quoting (the IDs are opaque by design), whether the matching engine itself is atomic
@@ -176,7 +182,11 @@ has to keep to build snapshots. A consumer that missed a few messages fetches th
 
 Clients compare their local hash and resnapshot only on a mismatch.
 
-**(e) Documentation.** State on `/ws/price` that a frame may contain several newline-separated messages (or send one per frame), and
+**(e) Renew and net-change semantics.** Because most refreshes change nothing, add either a `renew` action (extends an order's life without a
+cancel and a new ID) or a per-burst `batch_summary` (`levels_changed`, `net_depth_change_usd`) so a consumer can skip no-op bursts. Together with (b)
+this removes most of the stream: our data says about 11 level changes per burst, against 190 events today.
+
+**(f) Documentation.** State on `/ws/price` that a frame may contain several newline-separated messages (or send one per frame), and
 return `Retry-After` on handshake `503`s.
 
 ### 6.3 Rollout plan
@@ -220,6 +230,38 @@ Measured effect on the Strike series: spread uptime 86.3% -> 100.0%, 5th-percent
 Benchmarks are unaffected: Binance and Hyperliquid deliver whole-book snapshots or atomic diffs.
 
 ---
+
+## 7a. Plan: effort, risks and how Strike would know it worked
+
+| Item | Effort (estimate) | Owner |
+| --- | --- | --- |
+| Docs (newline framing, burst behaviour, `503` + `Retry-After`) | hours | docs |
+| `batch_id` / `batch_end` on v2 subscriptions | 1 to 2 days (the publisher already assigns sequences in order) | feed publisher |
+| Replay endpoint over a one-hour sequence log | 2 to 4 days (the log already exists to serve snapshots) | feed publisher |
+| `replace` / `renew` actions and checkpoint hash | 1 to 2 weeks including market-maker migration | matching engine + MM integrations |
+
+**Risks.** (1) Market-maker bots must adopt `replace`, so ship it additive and opt-in with v1 unchanged. (2) A replace must keep the cancel-plus-open
+priority rule, or FIFO guarantees change. (3) Batch brackets must never span a trade, so a fill is not hidden inside a half-applied batch. (4) The
+checksum must be defined over a canonical ordering, or clients will disagree.
+
+**Acceptance criteria (all measurable with the scripts in this repo).**
+1. 100% of events belong to a bracketed batch and a snapshot is always at a batch boundary (`analyze_churn`: bursts bracketed).
+2. A consumer that publishes its book only at `batch_end` shows 0% half-empty samples (`resample` rule becomes unnecessary).
+3. Events per fill falls by at least half and no-op bursts are skippable (`analyze_churn`: events per fill, state-neutral share).
+4. A 60-second gap can be healed from replay without a snapshot, and the local book hash matches the published hash (`verify`).
+
+**Open questions for Strike.** Is the one-second cadence a time-in-force or a market-maker loop? Is the engine itself atomic across a refresh? Would Strike
+publish a net-change summary rather than the full burst?
+
+## 7b. Summary
+
+| | |
+| --- | --- |
+| **The problem** | The public L3 feed refreshes the whole book once a second as about 190 separately numbered, unbracketed cancel and open events. |
+| **The real pain point** | Anyone reading the feed sees a thinner, wider book than Strike really has (86% against a true 99.99% spread uptime in our own scorecard), cancel/fill is meaningless, and 99.99% of the traffic is state-neutral refresh. That undermines credibility with the market makers and traders Strike wants. |
+| **What could have been done** | Batch brackets, an atomic `replace`, a `renew` or net-change message, a replay endpoint and a book checksum. All additive. |
+| **The fix we provide** | A specified, versioned, backward-compatible protocol (section 6), a rollout plan and acceptance tests; plus a working mitigation in Fathom (exact-timestamp sampling and a history rebuilt from raw events). |
+| **Proof it matters** | Reproducible with one command: `python -m fathom.analyze_churn`. |
 
 ## 8. Smaller findings
 
