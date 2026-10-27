@@ -29,10 +29,15 @@ MAX_SAMPLE_WAIT = 5
 
 # API
 API_HOST = os.environ.get("API_HOST", "0.0.0.0")
-API_PORT = int(os.environ.get("API_PORT", 8000))
+API_PORT = int(os.environ.get("PORT") or os.environ.get("API_PORT", 8000))
 CORS_ORIGINS = [o for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o]
 
 # Alerts: a feed whose heartbeat is older than this is "stale". If ALERT_WEBHOOK_URL is set (Discord, Slack or any
 # endpoint accepting a JSON POST) every alert is also delivered there; alerts are always stored and served at /api/alerts.
 ALERT_STALE_SECONDS = int(os.environ.get("ALERT_STALE_SECONDS", 60))
 ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "")
+
+# SNAPSHOT_MODE=1: serve a recorded snapshot of the database (no recorder on this host). The site says so; nothing is generated.
+SNAPSHOT_MODE = os.environ.get("SNAPSHOT_MODE", "") == "1"
+if SNAPSHOT_MODE and "FATHOM_DB" not in os.environ:
+    DB_PATH = os.path.join(os.path.dirname(__file__), "..", "snapshot", "fathom-snapshot.db")

@@ -19,6 +19,7 @@ const NAV: [string, string][] = [
 function Header() {
   const path = usePathname();
   const [ok, setOk] = useState<boolean | null>(null);
+  const [snap, setSnap] = useState<number | null>(null);
   const [t, setT] = useState("");
   const [zi, setZi] = useState(0);
   const ZONES: [string, string][] = [["UTC", "UTC"], ["America/New_York", "NYC"], ["Asia/Kolkata", "IST"]];
@@ -26,7 +27,7 @@ function Header() {
     const tick = () => setT(new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: ZONES[zi][0] }));
     tick();
     const a = setInterval(tick, 10000);
-    const f = () => getJson<{ ok: boolean }>("/api/health").then((h) => setOk(h.ok)).catch(() => setOk(false));
+    const f = () => getJson<{ ok: boolean; mode?: string; as_of?: number }>("/api/health").then((h) => { setOk(h.ok); setSnap(h.mode === "snapshot" ? h.as_of ?? 0 : null); }).catch(() => setOk(false));
     f();
     const b = setInterval(f, 15000);
     return () => { clearInterval(a); clearInterval(b); };
@@ -46,7 +47,7 @@ function Header() {
         <nav>
           {NAV.map(([h, l]) => <Link key={h} href={h} className={path === h ? "on" : ""}>{l}</Link>)}
         </nav>
-        <span className={`live ${ok ? "on" : ""}`}><i />{ok == null ? "checking" : ok ? "recording live" : "recorder offline"}</span>
+        <span className={`live ${ok ? "on" : ""}`}><i />{ok == null ? "checking" : snap != null ? "recorded data · " + new Date(snap).toLocaleDateString([], { month: "short", day: "numeric" }) : ok ? "recording live" : "recorder offline"}</span>
         <Link href="/scorecard" className="btn cta">Scorecard <Arrow /></Link>
       </div>
     </header>

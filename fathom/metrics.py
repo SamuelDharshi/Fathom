@@ -190,7 +190,14 @@ def coverage(con) -> dict:
                   "expected_samples": span / (config.SAMPLE_SECONDS * 1000),
                   "sample_coverage": (n / (span / (config.SAMPLE_SECONDS * 1000))) if span else None,
                   "gap_ms": gaps[0], "gap_count": gaps[1]}
-    ev = con.execute("SELECT COUNT(*),MIN(ts),MAX(ts) FROM l3_events").fetchone()
+    from . import db as _db
+    import json as _json
+    st = _db.get_meta(con, "l3_stats")
+    if st:
+        d = _json.loads(st)
+        ev = (d["count"], d["first_ts"], d["last_ts"])
+    else:
+        ev = con.execute("SELECT COUNT(*),MIN(ts),MAX(ts) FROM l3_events").fetchone()
     out["l3_events"] = {"count": ev[0], "first_ts": ev[1], "last_ts": ev[2]}
     return out
 

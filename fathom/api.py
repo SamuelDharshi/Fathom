@@ -41,6 +41,8 @@ def root():
 def health():
     c = con()
     now = db.now_ms()
+    if config.SNAPSHOT_MODE:
+        return {"now": now, "ok": True, "mode": "snapshot", "as_of": int(db.get_meta(c, "snapshot_as_of", 0) or 0), "feeds": {}}
     feeds = {}
     for v in ("strike", "binance", "hyperliquid", "strike_market"):
         hb = db.get_meta(c, f"heartbeat:{v}")
@@ -265,8 +267,9 @@ def _rollup_loop():
 @app.on_event("startup")
 def _startup():
     db.connect(config.DB_PATH).close()  # make sure tables exist before readers query them
-    threading.Thread(target=_rollup_loop, daemon=True).start()
-    threading.Thread(target=_alert_loop, daemon=True).start()
+    if not config.SNAPSHOT_MODE:  # a snapshot has no live feeds: no rollup writer, no stale-feed alerts
+        threading.Thread(target=_rollup_loop, daemon=True).start()
+        threading.Thread(target=_alert_loop, daemon=True).start()
     threading.Thread(target=_export_loop, daemon=True).start()
 
 

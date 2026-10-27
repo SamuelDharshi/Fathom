@@ -22,7 +22,8 @@ def run(con, rebate_bps: float, n_quoters: int, quote_size_usd: float, adverse_s
         raise ValueError("no Strike book recorded yet")
     book = json.loads(raw)
     age = db.now_ms() - book["ts"]
-    if age > MAX_BOOK_AGE_MS:
+    from . import config
+    if age > MAX_BOOK_AGE_MS and not config.SNAPSHOT_MODE:
         raise ValueError(f"latest recorded Strike book is {age // 1000}s old; recorder may be down")
     bids, asks = [tuple(x) for x in book["bids"]], [tuple(x) for x in book["asks"]]
     before = ladder_metrics(bids, asks)
