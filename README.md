@@ -350,3 +350,9 @@ FEEDBACK.md        the pain point we found in Strike's L3 design, with evidence 
 A tunnel to a laptop is not a production setup: the live numbers are only as available as that machine. The same code runs on any VPS with
 `docker compose up -d` or the systemd units in `deploy/`, which is how it should be run long term. Set `ALERT_WEBHOOK_URL` in `.env` to get
 a Discord or Slack message when a feed goes stale.
+
+### Hosting without the recorder machine (Render)
+
+`render.yaml` deploys the API from `snapshot/fathom-snapshot.db`, a compact snapshot of the real recorded database (every book sample, rollup,
+gap, fill and trade; the 11M raw cancel/open events are summarised by the per-minute rollup). The site labels this mode ("recorded data" with the
+snapshot date) and nothing is generated. Rebuild it with `python -m fathom.snapshot`. Live recording still needs an always-on machine.

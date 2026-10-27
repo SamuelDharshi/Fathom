@@ -1,0 +1,17 @@
+# One-click deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+# Serves the recorded snapshot (real data, as of the date shown on the site) without needing any recorder machine.
+services:
+  - type: web
+    name: fathom-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m fathom.api
+    healthCheckPath: /api/health
+    envVars:
+      - key: SNAPSHOT_MODE
+        value: "1"
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: CORS_ORIGINS
+        value: https://fathom-strike.vercel.app
